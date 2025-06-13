@@ -113,7 +113,7 @@
         top: 25,
         textStyle: { fontSize: 12 }
       },
-      grid: { left: '10%', right: '10%', bottom: '15%' },
+      grid: { left: '10%', right: '20%', bottom: '15%' }, // 右边留空间显示基差
       xAxis: {
         type: 'category',
         data: timeAxis,
@@ -126,19 +126,44 @@
         scale: true,
       },
       series: series,
+      graphic: [] // 预留graphic
     };
 
     chart.setOption(option);
     charts[symbol] = chart;
   });
 
-  // 更新图表数据
+  // 更新图表数据，并添加最新基差文本
   function updateCharts() {
     symbols.forEach(symbol => {
       const chart = charts[symbol];
       const seriesData = contractMonths.map(month => dataCache[symbol][month]);
+
+      // 找到最新非null基差，构造graphic文本数组
+      const latestTexts = contractMonths.map((month, idx) => {
+        const arr = dataCache[symbol][month];
+        let latest = null;
+        for(let i = arr.length -1; i>=0; i--) {
+          if (arr[i] !== null) {
+            latest = arr[i];
+            break;
+          }
+        }
+        return {
+          type: 'text',
+          left: '85%',  // 右边显示
+          top: 50 + idx * 20,
+          style: {
+            text: `${month}: ${latest !== null ? latest.toFixed(2) : '--'}`,
+            fill: '#333',
+            font: '14px Microsoft Yahei',
+          }
+        };
+      });
+
       chart.setOption({
-        series: seriesData.map(data => ({ data }))
+        series: seriesData.map(data => ({ data })),
+        graphic: latestTexts
       });
     });
   }
@@ -152,12 +177,6 @@
 
   ws.onmessage = event => {
     try {
-      // 后端数据示例格式：
-      // {
-      //   "IH00.CFE": [{"time":"09:30:00","basis":1.23}, ...],
-      //   "IF01.CFE": [...],
-      //   ...
-      // }
       const allData = JSON.parse(event.data);
 
       symbols.forEach(symbol => {

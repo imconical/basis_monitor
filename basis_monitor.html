@@ -1,86 +1,175 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <title>实时基差监控</title>
+    <meta charset="UTF-8" />
+    <title>多品种实时基差监控面板</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5"></script>
     <style>
         body {
+            margin: 0; padding: 0;
             display: flex;
             flex-wrap: wrap;
-            margin: 0;
-            padding: 0;
+            height: 100vh;
+            box-sizing: border-box;
+            font-family: "Microsoft Yahei", Arial, sans-serif;
+            background: #fafafa;
         }
         .chart-container {
-            width: 50%; /* 横向一半，纵向一半，总面积1/4 */
-            height: 50vh;
-            box-sizing: border-box;
+            width: 50%;    /* 2列 */
+            height: 50vh;  /* 2行 */
             padding: 10px;
+            box-sizing: border-box;
+        }
+        .chart-title {
+            text-align: center;
+            font-weight: bold;
+            font-size: 18px;
+            margin: 5px 0;
+            color: #333;
+        }
+        #footer {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            background: #eee;
+            padding: 4px 0;
         }
     </style>
 </head>
 <body>
     <div class="chart-container">
-        <h3>IC基差实时监控</h3>
-        <div id="chart" style="width: 100%; height: 90%;"></div>
+        <div class="chart-title">IH基差实时监控</div>
+        <div id="chart_IH" style="width: 100%; height: 90%;"></div>
     </div>
+    <div class="chart-container">
+        <div class="chart-title">IF基差实时监控</div>
+        <div id="chart_IF" style="width: 100%; height: 90%;"></div>
+    </div>
+    <div class="chart-container">
+        <div class="chart-title">IC基差实时监控</div>
+        <div id="chart_IC" style="width: 100%; height: 90%;"></div>
+    </div>
+    <div class="chart-container">
+        <div class="chart-title">IM基差实时监控</div>
+        <div id="chart_IM" style="width: 100%; height: 90%;"></div>
+    </div>
+    <div id="footer">数据由WindPy及后端推送支持，2025 ©</div>
 
-    <script>
-        const chartDom = document.getElementById('chart');
-        const myChart = echarts.init(chartDom);
-
-        // 生成固定时间轴
-        function generateTimeAxis() {
-            const times = [];
-
-            // 上午 9:30 - 11:30
-            for (let h = 9; h <= 11; h++) {
-                let startM = (h === 9) ? 30 : 0;
-                let endM = (h === 11) ? 30 : 59;
-                for (let m = startM; m <= endM; m++) {
-                    times.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`);
-                }
+<script>
+    // 固定时间轴生成
+    function generateTimeAxis() {
+        const times = [];
+        // 上午 9:30 - 11:30
+        for (let h = 9; h <= 11; h++) {
+            let startM = (h === 9) ? 30 : 0;
+            let endM = (h === 11) ? 30 : 59;
+            for (let m = startM; m <= endM; m++) {
+                times.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`);
             }
-
-            // 下午 13:00 - 15:00
-            for (let h = 13; h <= 15; h++) {
-                let endM = (h === 15) ? 0 : 59;
-                for (let m = 0; m <= endM; m++) {
-                    times.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`);
-                }
-            }
-            return times;
         }
+        // 下午 13:00 - 15:00
+        for (let h = 13; h <= 15; h++) {
+            let endM = (h === 15) ? 0 : 59;
+            for (let m = 0; m <= endM; m++) {
+                times.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`);
+            }
+        }
+        return times;
+    }
 
-        const timeAxis = generateTimeAxis();
-        const basisData = new Array(timeAxis.length).fill(null);  // 初始化为空
+    const timeAxis = generateTimeAxis();
 
+    // 创建echarts实例及基础option
+    function createChart(id) {
+        const dom = document.getElementById(id);
+        const chart = echarts.init(dom);
         const option = {
-            title: { text: '实时基差分时图', left: 'center', top: 10 },
+            title: { text: '', left: 'center', top: 10 },
             tooltip: { trigger: 'axis' },
             grid: { left: '10%', right: '10%', bottom: '10%' },
-            xAxis: { type: 'category', data: timeAxis },
+            xAxis: {
+                type: 'category',
+                data: timeAxis,
+                axisLabel: { interval: 30 }, // 每半小时显示一次标签
+                boundaryGap: false
+            },
             yAxis: { type: 'value', name: '基差' },
-            series: [
-                { name: '实时基差', type: 'line', data: basisData, smooth: true, showSymbol: false }
-            ]
+            series: [{
+                name: '基差',
+                type: 'line',
+                data: new Array(timeAxis.length).fill(null),
+                smooth: true,
+                showSymbol: false,
+            }]
         };
+        chart.setOption(option);
+        return chart;
+    }
 
-        myChart.setOption(option);
+    // 初始化4个品种的图表
+    const charts = {
+        IH: createChart("chart_IH"),
+        IF: createChart("chart_IF"),
+        IC: createChart("chart_IC"),
+        IM: createChart("chart_IM"),
+    };
 
-        const ws = new WebSocket("ws://localhost:8765/");
-        ws.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            // 由于后端传的是完整历史数组（时间按秒精度），需要对齐到分钟：
-            for (const item of data) {
-                const t = item.time.substring(0,5);  // 截取 HH:MM
-                const idx = timeAxis.indexOf(t);
-                if (idx !== -1) {
-                    basisData[idx] = item.basis;
+    // 数据缓存结构，键为品种，值为数组
+    const basisDataCache = {
+        IH: new Array(timeAxis.length).fill(null),
+        IF: new Array(timeAxis.length).fill(null),
+        IC: new Array(timeAxis.length).fill(null),
+        IM: new Array(timeAxis.length).fill(null),
+    };
+
+    // WebSocket连接
+    const ws = new WebSocket("ws://localhost:8765/");
+
+    ws.onopen = () => {
+        console.log("WebSocket已连接");
+    };
+
+    ws.onerror = (e) => {
+        console.error("WebSocket错误", e);
+    };
+
+    ws.onclose = () => {
+        console.warn("WebSocket连接关闭");
+    };
+
+    ws.onmessage = function(event) {
+        // 预期格式：
+        // {
+        //   "IH": [{"time":"09:30:00","basis":1.23}, ...],
+        //   "IF": [...],
+        //   "IC": [...],
+        //   "IM": [...]
+        // }
+        try {
+            const allData = JSON.parse(event.data);
+            for (const symbol of Object.keys(charts)) {
+                const symbolData = allData[symbol];
+                if (!symbolData) continue;
+
+                // 更新缓存
+                const cache = basisDataCache[symbol];
+                for (const item of symbolData) {
+                    // 时间转成 HH:MM
+                    const t = item.time.substring(0,5);
+                    const idx = timeAxis.indexOf(t);
+                    if (idx !== -1) {
+                        cache[idx] = item.basis;
+                    }
                 }
+                // 更新图表数据
+                charts[symbol].setOption({ series: [{ data: cache }] });
             }
-            myChart.setOption({ series: [{ data: basisData }] });
-        };
-    </script>
+        } catch(err) {
+            console.error("数据处理异常:", err);
+        }
+    };
+</script>
 </body>
 </html>

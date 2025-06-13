@@ -6,22 +6,31 @@ import asyncio
 import websockets
 import traceback
 
-# 内存中缓存的最新数据
-data_cache = {
-    "future_price": None,
-    "future_time": None,
-    "spot_price": None,
-    "spot_time": None,
+# 配置你要监控的品种及对应期货和现货代码
+symbols = {
+    "IH": {"future": "IH.CFE", "spot": "000016.SH"},
+    "IF": {"future": "IF.CFE", "spot": "000300.SH"},
+    "IC": {"future": "IC.CFE", "spot": "000905.SH"},
+    "IM": {"future": "IM.CFE", "spot": "000852.SH"},
 }
 
-real_time_data = []
-
-future_code = "IC.CFE"
-spot_code = "000905.SH"
-
-# Wind字段
+# 订阅字段
 future_fields = ["rt_latest", "rt_time"]
 spot_fields = ["rt_latest", "rt_time"]
+
+# 各品种数据缓存结构初始化
+data_cache = {
+    sym: {
+        "future_price": None,
+        "future_time": None,
+        "spot_price": None,
+        "spot_time": None,
+    } for sym in symbols
+}
+
+real_time_data = {
+    sym: [] for sym in symbols
+}
 
 # 时间格式转换
 def parse_rt_time(rt_time):
@@ -34,41 +43,49 @@ def parse_rt_time(rt_time):
     except Exception as e:
         return "00:00:00"
 
+# 反向映射 code 到 symbol 和类型（期货/现货），方便回调处理
+code_to_symbol = {}
+for sym, codes in symbols.items():
+    code_to_symbol[codes["future"]] = (sym, "future")
+    code_to_symbol[codes["spot"]] = (sym, "spot")
+
 # Wind统一回调函数
 def on_wind_data(indata):
-    global real_time_data
-
     try:
         code = indata.Codes[0]
         fields = indata.Fields
         data = indata.Data
-        # print(f"Received data for code: {code}, fields: {fields}, data: {data}")
+
+        if code not in code_to_symbol:
+            return  # 非关注代码数据忽略
+
+        sym, typ = code_to_symbol[code]
+
         # 逐字段更新缓存
         for i, field in enumerate(fields):
             value = data[i][0]
-            if code == future_code:
-                if field == "RT_LATEST":
-                    data_cache["future_price"] = round(value,2)
-                elif field == "RT_TIME":
-                    data_cache["future_time"] = parse_rt_time(value)
-            elif code == spot_code:
-                if field == "RT_LATEST":
-                    data_cache["spot_price"] = round(value,2)
-                elif field == "RT_TIME":
-                    data_cache["spot_time"] = parse_rt_time(value)
+            if typ == "future":
+                if field.upper() == "RT_LATEST":
+                    data_cache[sym]["future_price"] = round(value, 2)
+                elif field.upper() == "RT_TIME":
+                    data_cache[sym]["future_time"] = parse_rt_time(value)
+            elif typ == "spot":
+                if field.upper() == "RT_LATEST":
+                    data_cache[sym]["spot_price"] = round(value, 2)
+                elif field.upper() == "RT_TIME":
+                    data_cache[sym]["spot_time"] = parse_rt_time(value)
 
-        # print(f"Updated data cache: {data_cache}")
-        # 如果两边价格都齐了，可以计算基差
-        if data_cache["future_price"] is not None and data_cache["spot_price"] is not None:
-            basis = data_cache["future_price"] - data_cache["spot_price"]
-            basis = round(basis, 2)
-            time_str = data_cache["future_time"] or data_cache["spot_time"] or time.strftime("%H:%M:%S")
+        # 计算基差并存储
+        d = data_cache[sym]
+        if d["future_price"] is not None and d["spot_price"] is not None:
+            basis = round(d["future_price"] - d["spot_price"], 2)
+            time_str = d["future_time"] or d["spot_time"] or time.strftime("%H:%M:%S")
 
-            print(f"[{time_str}] Future: {data_cache['future_price']}, Spot: {data_cache['spot_price']}, Basis: {basis}")
+            print(f"[{time_str}] {sym} Future: {d['future_price']}, Spot: {d['spot_price']}, Basis: {basis}")
 
-            real_time_data.append({"time": time_str, "basis": round(basis, 2)})
-            if len(real_time_data) > 300:
-                real_time_data.pop(0)
+            real_time_data[sym].append({"time": time_str, "basis": basis})
+            if len(real_time_data[sym]) > 300:
+                real_time_data[sym].pop(0)
 
     except Exception as e:
         print("Wind数据异常：", e)
@@ -77,9 +94,11 @@ def on_wind_data(indata):
 # 启动Wind订阅
 def start_wind():
     w.start()
-    # 分别订阅期货和现货，注意回调函数是同一个
-    w.wsq(future_code, ",".join(future_fields), func=on_wind_data)
-    w.wsq(spot_code, ",".join(spot_fields), func=on_wind_data)
+
+    # 订阅所有期货代码
+    for sym in symbols:
+        w.wsq(symbols[sym]["future"], ",".join(future_fields), func=on_wind_data)
+        w.wsq(symbols[sym]["spot"], ",".join(spot_fields), func=on_wind_data)
 
     while True:
         time.sleep(1)
@@ -88,7 +107,7 @@ def start_wind():
 async def send_data(websocket, path):
     try:
         while True:
-            await websocket.send(json.dumps(real_time_data))
+            await websocket.send(json.dumps(real_time_data, ensure_ascii=False))
             await asyncio.sleep(1)
     except websockets.exceptions.ConnectionClosed:
         print("客户端断开连接")
@@ -99,5 +118,5 @@ async def main():
     await server.wait_closed()
 
 if __name__ == '__main__':
-    threading.Thread(target=start_wind).start()
+    threading.Thread(target=start_wind, daemon=True).start()
     asyncio.run(main())

@@ -126,7 +126,7 @@ def on_wind_data(indata):
                 print(f"[{time_str}] {sym} {contract_or_spot} Basis: {basis} | "
                       f"Data points: {len(real_time_data[sym][contract_or_spot])}")
                 
-            print(f"[DEBUG] 新增数据点: {sym} {contract_or_spot} -> {basis}")
+            # print(f"[DEBUG] 新增数据点: {sym} {contract_or_spot} -> {basis}")
 
 
     except Exception as e:

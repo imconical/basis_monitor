@@ -21,7 +21,6 @@
     padding: 10px;
     box-sizing: border-box;
     height: 350px;
-    position: relative;
   }
   .chart-title {
     font-weight: bold;
@@ -30,13 +29,6 @@
     margin-bottom: 6px;
     text-align: center;
   }
-  .data-info {
-    position: absolute;
-    top: 5px;
-    right: 10px;
-    font-size: 12px;
-    color: #666;
-  }
 </style>
 </head>
 <body>
@@ -44,34 +36,35 @@
 <div id="container"></div>
 
 <script>
-  // 基本配置
   const symbols = ["IH", "IF", "IC", "IM"];
   const contractMonths = ["00", "01", "02", "03"];
   const contractSuffix = ".CFE";
-  
-  // 存储图表实例和数据缓存
-  const charts = {};
-  // 格式：{ symbol: { month: { data: [基差值], times: [时间点] } } }
-  const dataCache = {};
-  const lastUpdateTime = {}; // 记录最后更新时间
-  
-  // 初始化缓存结构
-  symbols.forEach(symbol => {
-    dataCache[symbol] = {};
-    contractMonths.forEach(month => {
-      dataCache[symbol][month] = {
-        data: [],
-        times: []
-      };
-    });
-    lastUpdateTime[symbol] = Date.now();
-  });
 
+  function generateTimeAxis() {
+    const times = [];
+    for(let h=9; h<=11; h++) {
+      const startM = (h === 9) ? 30 : 0;
+      const endM = (h === 11) ? 30 : 59;
+      for(let m=startM; m<=endM; m++) {
+        times.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`);
+      }
+    }
+    for(let h=13; h<=15; h++) {
+      const endM = (h === 15) ? 0 : 59;
+      for(let m=0; m<=endM; m++) {
+        times.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`);
+      }
+    }
+    return times;
+  }
+
+  const timeAxis = generateTimeAxis();
   const container = document.getElementById("container");
 
-  // 初始化图表
+  const charts = {};
+  const dataCache = {};
+
   symbols.forEach(symbol => {
-    // 创建容器
     const box = document.createElement("div");
     box.className = "chart-box";
 
@@ -79,143 +72,84 @@
     title.className = "chart-title";
     title.textContent = `${symbol} 品种基差实时监控`;
     box.appendChild(title);
-    
-    const info = document.createElement("div");
-    info.className = "data-info";
-    info.id = `info-${symbol}`;
-    info.textContent = "数据点: 0";
-    box.appendChild(info);
 
     const chartDiv = document.createElement("div");
     chartDiv.style.width = "100%";
     chartDiv.style.height = "300px";
     box.appendChild(chartDiv);
-
     container.appendChild(box);
 
-    // 初始化echarts实例
     const chart = echarts.init(chartDiv);
-
-    // 准备series数组，4条折线
-    const series = contractMonths.map(month => ({
-      name: `${symbol}${month}`,
-      type: 'line',
-      smooth: true,
-      showSymbol: false,
-      data: [],
-      emphasis: { focus: 'series' },
-      connectNulls: true,
-    }));
+    dataCache[symbol] = {};
+    contractMonths.forEach(month => {
+      dataCache[symbol][month] = new Array(timeAxis.length).fill(null);
+    });
 
     const option = {
-      tooltip: {
-        trigger: 'axis',
-        formatter: function(params) {
-          const time = params[0].axisValue;
-          let result = `<div>${time}</div>`;
-          params.forEach(param => {
-            const value = param.value !== null ? param.value.toFixed(2) : '--';
-            result += `<div style="margin-top:5px;">
-              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${param.color};"></span>
-              ${param.seriesName}: ${value}
-            </div>`;
-          });
-          return result;
-        }
-      },
-      legend: {
-        data: series.map(s => s.name),
-        top: 25,
-        textStyle: { fontSize: 12 }
-      },
+      tooltip: { trigger: 'axis' },
+      legend: { data: contractMonths, top: 25 },
       grid: { left: '10%', right: '20%', bottom: '15%' },
       xAxis: {
         type: 'category',
-        data: [],
-        axisLabel: { 
-          interval: (index) => index % 60 === 0, // 每小时显示一个标签
-          formatter: function(value) {
-            return value.substring(0, 5); // 显示 HH:mm
+        data: timeAxis,
+        axisLabel: {
+          interval: function(index, value) {
+            return index % 30 === 0;
           }
         },
         boundaryGap: false,
       },
-      yAxis: {
-        type: 'value',
-        name: '基差',
-        scale: true,
-      },
-      series: series,
-      animation: false, // 禁用动画提高性能
-      dataZoom: [{
-        type: 'inside',
-        start: 95,
-        end: 100
-      }]
+      yAxis: { type: 'value', name: '基差', scale: true },
+      series: contractMonths.map(month => ({
+        name: month,
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        data: dataCache[symbol][month],
+        connectNulls: true,
+        emphasis: { focus: 'series' },
+      })),
+      graphic: []
     };
 
     chart.setOption(option);
     charts[symbol] = chart;
   });
 
-  // 更新单个品种的图表
-  function updateChartForSymbol(symbol) {
-    const chart = charts[symbol];
-    if (!chart) return;
-
-    const seriesData = [];
-    const allTimes = [];
-    
-    // 收集所有时间点（去重并排序）
-    contractMonths.forEach(month => {
-      dataCache[symbol][month].times.forEach(time => {
-        if (!allTimes.includes(time)) {
-          allTimes.push(time);
+  function updateCharts() {
+    symbols.forEach(symbol => {
+      const chart = charts[symbol];
+      const latestTexts = contractMonths.map((month, idx) => {
+        const arr = dataCache[symbol][month];
+        let latest = null;
+        for (let i = arr.length - 1; i >= 0; i--) {
+          if (arr[i] !== null) {
+            latest = arr[i];
+            break;
+          }
         }
+        return {
+          type: 'text',
+          left: '85%',
+          top: 50 + idx * 20,
+          style: {
+            text: `${month}: ${latest !== null ? latest.toFixed(2) : '--'}`,
+            fill: '#333',
+            font: '14px Microsoft Yahei',
+          }
+        };
       });
-    });
-    
-    allTimes.sort((a, b) => new Date(`1970-01-01T${a}`) - new Date(`1970-01-01T${b}`));
-    
-    // 为每个合约系列准备数据
-    contractMonths.forEach(month => {
-      const seriesPoints = [];
-      const cache = dataCache[symbol][month];
-      
-      // 为每个时间点查找对应的基差值
-      allTimes.forEach(time => {
-        const idx = cache.times.indexOf(time);
-        if (idx !== -1) {
-          seriesPoints.push(cache.data[idx]);
-        } else {
-          seriesPoints.push(null); // 没有数据的位置填充null
-        }
-      });
-      
-      seriesData.push({
-        name: `${symbol}${month}`,
-        data: seriesPoints
-      });
-    });
 
-    // 更新数据点计数
-    const infoEl = document.getElementById(`info-${symbol}`);
-    if (infoEl) {
-      let totalPoints = 0;
-      contractMonths.forEach(month => {
-        totalPoints += dataCache[symbol][month].data.length;
+      chart.setOption({
+        series: contractMonths.map(month => ({
+          name: month,
+          data: dataCache[symbol][month],
+        })),
+        graphic: latestTexts
       });
-      infoEl.textContent = `数据点: ${totalPoints}`;
-    }
-
-    // 更新图表选项
-    chart.setOption({
-      xAxis: { data: allTimes },
-      series: seriesData
     });
   }
 
-  // WebSocket连接
   const ws = new WebSocket("ws://localhost:8765/");
 
   ws.onopen = () => console.log("WebSocket已连接");
@@ -225,51 +159,30 @@
   ws.onmessage = event => {
     try {
       const allData = JSON.parse(event.data);
-      const now = Date.now();
-      
-      // 处理接收到的增量数据
-      Object.keys(allData).forEach(contractKey => {
-        // 合约键示例：IH00.CFE
-        const match = contractKey.match(/^(\w{2})(\d{2})\.CFE$/);
+      Object.entries(allData).forEach(([fullCode, list]) => {
+        // 提取品种和月份
+        const match = fullCode.match(/^([A-Z]+)(\d{2})\.CFE$/);
         if (!match) return;
-
         const symbol = match[1];
         const month = match[2];
-        const newData = allData[contractKey];
-        
-        // 只处理我们关注的品种
-        if (!symbols.includes(symbol)) return;
-        
-        // 添加到缓存
-        newData.forEach(item => {
-          dataCache[symbol][month].data.push(item.basis);
-          dataCache[symbol][month].times.push(item.time);
+        if (!symbols.includes(symbol) || !contractMonths.includes(month)) return;
+
+        const cacheArr = dataCache[symbol][month];
+
+        list.forEach(item => {
+          const t = item.time.slice(0,5); // 仅取 HH:MM
+          const idx = timeAxis.indexOf(t);
+          if (idx !== -1) {
+            cacheArr[idx] = item.basis;
+          }
         });
-        
-        // 更新最后更新时间
-        lastUpdateTime[symbol] = now;
-      });
-      
-      // 更新图表（只更新最近有变化的品种）
-      symbols.forEach(symbol => {
-        if (now - lastUpdateTime[symbol] < 2000) { // 2秒内有更新
-          updateChartForSymbol(symbol);
-        }
       });
 
+      updateCharts();
     } catch (err) {
       console.error("WebSocket数据处理异常:", err);
     }
   };
-  
-  // 添加窗口大小变化时的响应
-  window.addEventListener('resize', () => {
-    symbols.forEach(symbol => {
-      if (charts[symbol]) {
-        charts[symbol].resize();
-      }
-    });
-  });
 </script>
 
 </body>

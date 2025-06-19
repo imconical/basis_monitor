@@ -1,5 +1,7 @@
 from WindPy import w
 import time
+from datetime import datetime
+import os
 import threading
 import json
 import asyncio
@@ -10,7 +12,7 @@ from collections import deque  # 使用高效的双端队列
 # 配置参数
 MAX_HISTORY_LENGTH = 10000  # 每个合约存储的最大数据点数
 SEND_HISTORY_LENGTH = 300   # 每次发送给客户端的数据点数
-SAVE_TO_FILE = False        # 是否保存数据到文件
+SAVE_TO_FILE = True        # 是否保存数据到文件
 SAVE_INTERVAL = 60          # 保存间隔(秒)
 
 # 基础品种代码
@@ -34,7 +36,8 @@ def generate_future_contracts(symbol):
 # 初始化缓存结构
 data_cache = {}
 real_time_data = {}
-last_sent_data = {}  # 记录上次发送的数据位置
+# last_sent_data = {}  # 记录上次发送的数据位置
+last_sent_timestamp = {}  # 记录每个合约最后一次发送的时间戳
 
 for sym in symbols:
     data_cache[sym] = {}
@@ -49,7 +52,9 @@ for sym in symbols:
         }
         # 使用deque替代列表，设置最大长度
         real_time_data[sym][fc] = deque(maxlen=MAX_HISTORY_LENGTH)
-        last_sent_data[fc] = 0  # 初始化发送位置
+        # last_sent_data[fc] = 0  # 初始化发送位置
+        last_sent_timestamp[fc] = 0
+
 
 # 现货代码缓存
 spot_codes = {sym: symbols[sym]["spot"] for sym in symbols}
@@ -72,6 +77,15 @@ def parse_rt_time(rt_time):
         return f"{rt_time_str[0:2]}:{rt_time_str[2:4]}:{rt_time_str[4:6]}"
     except:
         return "00:00:00"
+    
+# 判断当前是否为交易时段（9:30–11:30，13:00–15:00）
+def is_trading_time():
+    now = datetime.now()
+    total_minutes = now.hour * 60 + now.minute
+
+    # 上午交易时间段：570 (9:30) <= t <= 690 (11:30)
+    # 下午交易时间段：780 (13:00) <= t <= 900 (15:00)
+    return (570 <= total_minutes <= 690) or (780 <= total_minutes <= 900)
 
 def on_wind_data(indata):
     try:
@@ -133,24 +147,53 @@ def on_wind_data(indata):
         print("Wind数据异常：", e)
         traceback.print_exc()
 
+# # 数据保存函数
+# def save_data_periodically():
+#     while True:
+#         time.sleep(SAVE_INTERVAL)
+#         if not SAVE_TO_FILE:
+#             continue
+            
+#         try:
+#             timestamp = int(time.time())
+#             filename = f"basis_data_{timestamp}.json"
+#             with open(filename, 'w') as f:
+#                 # 只保存需要的数据
+#                 save_data = {}
+#                 for sym in real_time_data:
+#                     save_data[sym] = {}
+#                     for contract, data in real_time_data[sym].items():
+#                         save_data[sym][contract] = list(data)
+#                 json.dump(save_data, f)
+#             print(f"数据已保存到 {filename}")
+#         except Exception as e:
+#             print("保存数据时出错:", e)
 # 数据保存函数
 def save_data_periodically():
     while True:
         time.sleep(SAVE_INTERVAL)
         if not SAVE_TO_FILE:
             continue
-            
+        if not is_trading_time():
+            print("当前非交易时段，跳过保存")
+            continue
         try:
-            timestamp = int(time.time())
-            filename = f"basis_data_{timestamp}.json"
+            # 构造文件路径和识别性更强的文件名
+            timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            directory = "data"
+            os.makedirs(directory, exist_ok=True)  # 确保目录存在
+            filename = os.path.join(directory, f"basis_data_{timestamp_str}.json")
+
+            # 构造保存数据
+            save_data = {}
+            for sym in real_time_data:
+                save_data[sym] = {}
+                for contract, data in real_time_data[sym].items():
+                    save_data[sym][contract] = list(data)
+
             with open(filename, 'w') as f:
-                # 只保存需要的数据
-                save_data = {}
-                for sym in real_time_data:
-                    save_data[sym] = {}
-                    for contract, data in real_time_data[sym].items():
-                        save_data[sym][contract] = list(data)
                 json.dump(save_data, f)
+
             print(f"数据已保存到 {filename}")
         except Exception as e:
             print("保存数据时出错:", e)
@@ -218,6 +261,8 @@ async def send_data(websocket, path):
                 new_data = [item for item in data_deque if item["timestamp"] >= start_of_day]
                 if new_data:
                     send_obj[contract_code] = new_data
+                    # 初始化时设置为最新时间戳
+                    last_sent_timestamp[contract_code] = new_data[-1]["timestamp"]
                 # ✅ 不要修改 last_sent_data[contract_code]，否则会跳过新增数据
 
         # 发送历史数据给前端
@@ -230,18 +275,24 @@ async def send_data(websocket, path):
             send_obj = {}
             for sym in real_time_data:
                 for contract_code, data_deque in real_time_data[sym].items():
-                    # 获取新数据点
-                    last_index = last_sent_data[contract_code]
-                    current_length = len(data_deque)
+                    # # 获取新数据点
+                    # last_index = last_sent_data[contract_code]
+                    # current_length = len(data_deque)
                     
-                    if current_length > last_index:
-                        # 获取新增数据点，最多SEND_HISTORY_LENGTH个
-                        new_data = list(data_deque)[last_index:]
-                        if len(new_data) > SEND_HISTORY_LENGTH:
-                            new_data = new_data[-SEND_HISTORY_LENGTH:]
+                    # if current_length > last_index:
+                    #     # 获取新增数据点，最多SEND_HISTORY_LENGTH个
+                    #     new_data = list(data_deque)[last_index:]
+                    #     if len(new_data) > SEND_HISTORY_LENGTH:
+                    #         new_data = new_data[-SEND_HISTORY_LENGTH:]
                         
+                    #     send_obj[contract_code] = new_data
+                    #     last_sent_data[contract_code] = current_length
+                    last_time = last_sent_timestamp.get(contract_code, 0)
+                    new_data = [item for item in data_deque if item["timestamp"] > last_time]
+                    if new_data:
                         send_obj[contract_code] = new_data
-                        last_sent_data[contract_code] = current_length
+                        last_sent_timestamp[contract_code] = new_data[-1]["timestamp"]
+
             
             if send_obj:
                 await websocket.send(json.dumps(send_obj, ensure_ascii=False))

@@ -197,16 +197,28 @@ def start_wind():
 async def send_data(websocket, path):
     try:
         print(f"客户端连接: {websocket.remote_address}")
-        # ✅ 发送所有合约的最近 SEND_HISTORY_LENGTH 条数据（仅连接建立时发送一次）
+        # # ✅ 发送所有合约的最近 SEND_HISTORY_LENGTH 条数据（仅连接建立时发送一次）
+        # send_obj = {}
+        # for sym in real_time_data:
+        #     for contract_code, data_deque in real_time_data[sym].items():
+        #         # 获取最近 SEND_HISTORY_LENGTH 条数据
+        #         new_data = list(data_deque)[-SEND_HISTORY_LENGTH:]
+        #         if new_data:
+        #             send_obj[contract_code] = new_data
+        #         # ✅ 不再重置 last_sent_data，保持为默认 0 或原值，避免误认为已发送
+        #         # last_sent_data[contract_code] = len(data_deque) ← 注释掉这行
+        
+        # ✅ 发送所有合约当天的数据
         send_obj = {}
+        start_of_day = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))  # 今天0点的时间戳
+
         for sym in real_time_data:
             for contract_code, data_deque in real_time_data[sym].items():
-                # 获取最近 SEND_HISTORY_LENGTH 条数据
-                new_data = list(data_deque)[-SEND_HISTORY_LENGTH:]
+                # 过滤出当天的数据
+                new_data = [item for item in data_deque if item["timestamp"] >= start_of_day]
                 if new_data:
                     send_obj[contract_code] = new_data
-                # 重置 last_sent_data，使得只发送后续新增数据
-                last_sent_data[contract_code] = len(data_deque)
+                # ✅ 不要修改 last_sent_data[contract_code]，否则会跳过新增数据
 
         # 发送历史数据给前端
         if send_obj:

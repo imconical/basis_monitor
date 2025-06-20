@@ -240,68 +240,43 @@ def start_wind():
 async def send_data(websocket, path):
     try:
         print(f"客户端连接: {websocket.remote_address}")
-        # # ✅ 发送所有合约的最近 SEND_HISTORY_LENGTH 条数据（仅连接建立时发送一次）
-        # send_obj = {}
-        # for sym in real_time_data:
-        #     for contract_code, data_deque in real_time_data[sym].items():
-        #         # 获取最近 SEND_HISTORY_LENGTH 条数据
-        #         new_data = list(data_deque)[-SEND_HISTORY_LENGTH:]
-        #         if new_data:
-        #             send_obj[contract_code] = new_data
-        #         # ✅ 不再重置 last_sent_data，保持为默认 0 或原值，避免误认为已发送
-        #         # last_sent_data[contract_code] = len(data_deque) ← 注释掉这行
-        
-        # ✅ 发送所有合约当天的数据
+
+        # ✅ 初始化阶段：发送当天数据
         send_obj = {}
         start_of_day = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))  # 今天0点的时间戳
 
         for sym in real_time_data:
             for contract_code, data_deque in real_time_data[sym].items():
-                # 过滤出当天的数据
-                new_data = [item for item in data_deque if item["timestamp"] >= start_of_day]
+                data_snapshot = list(data_deque)  # ✅ 拷贝 deque，防止并发修改
+                new_data = [item for item in data_snapshot if item["timestamp"] >= start_of_day]
                 if new_data:
                     send_obj[contract_code] = new_data
-                    # 初始化时设置为最新时间戳
                     last_sent_timestamp[contract_code] = new_data[-1]["timestamp"]
-                # ✅ 不要修改 last_sent_data[contract_code]，否则会跳过新增数据
 
-        # 发送历史数据给前端
         if send_obj:
             await websocket.send(json.dumps(send_obj, ensure_ascii=False))
 
-        # ✅ 持续发送增量数据
+        # ✅ 持续推送增量数据
         while True:
-            # 仅发送自上次更新后的新数据
             send_obj = {}
             for sym in real_time_data:
                 for contract_code, data_deque in real_time_data[sym].items():
-                    # # 获取新数据点
-                    # last_index = last_sent_data[contract_code]
-                    # current_length = len(data_deque)
-                    
-                    # if current_length > last_index:
-                    #     # 获取新增数据点，最多SEND_HISTORY_LENGTH个
-                    #     new_data = list(data_deque)[last_index:]
-                    #     if len(new_data) > SEND_HISTORY_LENGTH:
-                    #         new_data = new_data[-SEND_HISTORY_LENGTH:]
-                        
-                    #     send_obj[contract_code] = new_data
-                    #     last_sent_data[contract_code] = current_length
                     last_time = last_sent_timestamp.get(contract_code, 0)
-                    new_data = [item for item in data_deque if item["timestamp"] > last_time]
+                    data_snapshot = list(data_deque)  # ✅ 再次做快照
+                    new_data = [item for item in data_snapshot if item["timestamp"] > last_time]
                     if new_data:
                         send_obj[contract_code] = new_data
                         last_sent_timestamp[contract_code] = new_data[-1]["timestamp"]
 
-            
             if send_obj:
                 await websocket.send(json.dumps(send_obj, ensure_ascii=False))
-            
-            await asyncio.sleep(0.5)  # 更频繁的更新
+
+            await asyncio.sleep(0.5)
     except websockets.exceptions.ConnectionClosed:
         print(f"客户端断开: {websocket.remote_address}")
     except Exception as e:
         print("WebSocket异常:", e)
+        traceback.print_exc()
 
 async def main():
     server = await websockets.serve(send_data, "localhost", 8765)

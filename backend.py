@@ -10,7 +10,7 @@ import traceback
 from collections import deque  # 使用高效的双端队列
 
 # 配置参数
-MAX_HISTORY_LENGTH = 10000  # 每个合约存储的最大数据点数
+# MAX_HISTORY_LENGTH = 10000  # 每个合约存储的最大数据点数
 SEND_HISTORY_LENGTH = 300   # 每次发送给客户端的数据点数
 SAVE_TO_FILE = True        # 是否保存数据到文件
 SAVE_INTERVAL = 60          # 保存间隔(秒)
@@ -51,7 +51,9 @@ for sym in symbols:
             "spot_time": None,
         }
         # 使用deque替代列表，设置最大长度
-        real_time_data[sym][fc] = deque(maxlen=MAX_HISTORY_LENGTH)
+        # real_time_data[sym][fc] = deque(maxlen=MAX_HISTORY_LENGTH)
+        real_time_data[sym][fc] = deque()  # 无限制长度
+
         # last_sent_data[fc] = 0  # 初始化发送位置
         last_sent_timestamp[fc] = 0
 
@@ -127,6 +129,12 @@ def on_wind_data(indata):
         if d["future_price"] is not None and d["spot_price"] is not None:
             basis = round(d["future_price"] - d["spot_price"], 2)
             time_str = d["future_time"] or d["spot_time"] or time.strftime("%H:%M:%S")
+
+            # 只记录当天数据
+            current_time = datetime.now()
+            record_time = datetime.fromtimestamp(timestamp)
+            if current_time.date() != record_time.date():
+                return
             
             # 使用高效的方式添加数据
             real_time_data[sym][contract_or_spot].append({

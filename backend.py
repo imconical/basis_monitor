@@ -155,42 +155,53 @@ def on_wind_data(indata):
         print("Wind数据异常：", e)
         traceback.print_exc()
 
-# # 数据保存函数
-# def save_data_periodically():
-#     while True:
-#         time.sleep(SAVE_INTERVAL)
-#         if not SAVE_TO_FILE:
-#             continue
-            
-#         try:
-#             timestamp = int(time.time())
-#             filename = f"basis_data_{timestamp}.json"
-#             with open(filename, 'w') as f:
-#                 # 只保存需要的数据
-#                 save_data = {}
-#                 for sym in real_time_data:
-#                     save_data[sym] = {}
-#                     for contract, data in real_time_data[sym].items():
-#                         save_data[sym][contract] = list(data)
-#                 json.dump(save_data, f)
-#             print(f"数据已保存到 {filename}")
-#         except Exception as e:
-#             print("保存数据时出错:", e)
 # 数据保存函数
 def save_data_periodically():
+    from shutil import rmtree
+
+    def is_saving_allowed():
+        now = datetime.now()
+        total_minutes = now.hour * 60 + now.minute
+        # 允许保存的时间为 9:30 ~ 15:00，即 570 <= t < 900
+        return 570 <= total_minutes < 900
+
+
+    def cleanup_old_data(base_dir, keep_days=7):
+        try:
+            all_dirs = sorted(
+                [d for d in os.listdir(base_dir)
+                 if os.path.isdir(os.path.join(base_dir, d))],
+                reverse=True
+            )
+            for dir_name in all_dirs[keep_days:]:
+                full_path = os.path.join(base_dir, dir_name)
+                rmtree(full_path)
+                print(f"已删除旧数据目录: {full_path}")
+        except Exception as e:
+            print("清理旧数据时出错:", e)
+
+    base_dir = "data"
+    os.makedirs(base_dir, exist_ok=True)
+
     while True:
         time.sleep(SAVE_INTERVAL)
         if not SAVE_TO_FILE:
             continue
-        if not is_trading_time():
-            print("当前非交易时段，跳过保存")
-            continue
+
+        if not is_saving_allowed():
+            continue  # 早于9:30或晚于15:00时不保存，也不打印日志
+
         try:
-            # 构造文件路径和识别性更强的文件名
-            timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            directory = "data"
-            os.makedirs(directory, exist_ok=True)  # 确保目录存在
-            filename = os.path.join(directory, f"basis_data_{timestamp_str}.json")
+            now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+            timestamp_str = now.strftime("%H-%M-%S")
+
+            # 创建当日日目录
+            date_dir = os.path.join(base_dir, date_str)
+            os.makedirs(date_dir, exist_ok=True)
+
+            # 保存文件名
+            filename = os.path.join(date_dir, f"basis_data_{timestamp_str}.json")
 
             # 构造保存数据
             save_data = {}
@@ -203,6 +214,10 @@ def save_data_periodically():
                 json.dump(save_data, f)
 
             print(f"数据已保存到 {filename}")
+
+            # 定期清理老数据（仅保留最近7个交易日）
+            cleanup_old_data(base_dir, keep_days=7)
+
         except Exception as e:
             print("保存数据时出错:", e)
 
@@ -245,7 +260,7 @@ def start_wind():
     while True:
         time.sleep(1)
 
-async def send_data(websocket, path):
+async def send_data(websocket, path=None):
     try:
         print(f"客户端连接: {websocket.remote_address}")
 

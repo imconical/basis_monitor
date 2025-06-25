@@ -86,8 +86,8 @@ def is_trading_time():
     total_minutes = now.hour * 60 + now.minute
 
     # 上午交易时间段：570 (9:30) <= t <= 690 (11:30)
-    # 下午交易时间段：780 (13:00) <= t <= 900 (15:00)
-    return (570 <= total_minutes <= 690) or (780 <= total_minutes <= 900)
+    # 下午交易时间段：780 (13:00) <= t <= 901 (15:01)
+    return (570 <= total_minutes <= 690) or (780 <= total_minutes <= 901)
 
 def on_wind_data(indata):
     try:
@@ -159,13 +159,6 @@ def on_wind_data(indata):
 def save_data_periodically():
     from shutil import rmtree
 
-    def is_saving_allowed():
-        now = datetime.now()
-        total_minutes = now.hour * 60 + now.minute
-        # 允许保存的时间为 9:30 ~ 15:00，即 570 <= t < 900
-        return 570 <= total_minutes < 900
-
-
     def cleanup_old_data(base_dir, keep_days=7):
         try:
             all_dirs = sorted(
@@ -187,9 +180,10 @@ def save_data_periodically():
         time.sleep(SAVE_INTERVAL)
         if not SAVE_TO_FILE:
             continue
-
-        if not is_saving_allowed():
-            continue  # 早于9:30或晚于15:00时不保存，也不打印日志
+        
+        # 仅在交易时间段内保存数据
+        if not is_trading_time():
+            continue # 当前不在交易时间段内，跳过数据保存
 
         try:
             now = datetime.now()

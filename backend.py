@@ -155,6 +155,26 @@ def on_wind_data(indata):
         print("Wind数据异常：", e)
         traceback.print_exc()
 
+def load_today_data():
+    try:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        filepath = os.path.join("data", today_str, "basis_data.json")
+        if not os.path.exists(filepath):
+            print("未找到今日数据文件，开始新数据记录。")
+            return
+        with open(filepath, "r") as f:
+            loaded_data = json.load(f)
+        # 加载到 real_time_data
+        for sym in loaded_data:
+            for contract, data_list in loaded_data[sym].items():
+                real_time_data[sym][contract] = deque(data_list)
+                if data_list:
+                    last_sent_timestamp[contract] = data_list[-1]["timestamp"]
+        print(f"✅ 已加载今日数据文件，共加载数据点：{sum(len(d) for s in loaded_data.values() for d in s.values())}")
+    except Exception as e:
+        print("⚠️ 加载今日数据文件失败：", e)
+        traceback.print_exc()
+        
 # 数据保存函数
 def save_data_periodically():
     from shutil import rmtree
@@ -195,7 +215,8 @@ def save_data_periodically():
             os.makedirs(date_dir, exist_ok=True)
 
             # 保存文件名
-            filename = os.path.join(date_dir, f"basis_data_{timestamp_str}.json")
+            # filename = os.path.join(date_dir, f"basis_data_{timestamp_str}.json")
+            filename = os.path.join(date_dir, "basis_data.json")  # 覆盖写入
 
             # 构造保存数据
             save_data = {}
@@ -217,8 +238,10 @@ def save_data_periodically():
 
 def start_wind():
     w.start()
-    # print("WindPy连接成功，版本:", w.wssq("000001.SH").Data[0][0])
     print("WindPy连接成功")
+
+    # 👇 加载当日已有数据（如存在）
+    load_today_data()
 
     # # 订阅所有合约
     # all_codes = []

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>基差&期权&ETF监控平台</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Microsoft Yahei", Arial, sans-serif;
+      background: #f9f9f9;
+    }
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      z-index: 1000;
+      background: #2c3e50;
+      color: white;
+      padding: 10px;
+    }
+    nav button {
+      margin-right: 10px;
+      padding: 6px 12px;
+      border: none;
+      background: #34495e;
+      color: white;
+      cursor: pointer;
+    }
+    nav button:hover {
+      background: #1abc9c;
+    }
+    main {
+      padding: 70px 10px 10px 10px;  /* 顶部留出空间 */
+    }
+    .page-section {
+      display: none;
+    }
+    .page-section.grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+    }
+    .chart-box {
+      background: white;
+      border: 1px solid #ddd;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+      height: 360px;
+    }
+    .chart-title {
+      font-weight: bold;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    .chart-content {
+      /* flex: 1; */
+      width: 100%;
+      height: 300px;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <button data-page="basis">基差监控</button>
+    <button data-page="option_iv">期权波动率</button>
+    <button data-page="etf">ETF实时申赎</button>
+  </nav>
+
+  <main>
+    <section id="page-basis" class="page-section grid"></section>
+    <section id="page-option_iv" class="page-section grid"></section>
+    <section id="page-etf" class="page-section"></section>
+  </main>
+
+  <script>
+    const timeAxis = (() => {
+      const times = [];
+      for (let h = 9; h <= 11; h++) {
+        const startM = (h === 9) ? 30 : 0;
+        const endM = (h === 11) ? 30 : 59;
+        for (let m = startM; m <= endM; m++) {
+          times.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`);
+        }
+      }
+      for (let h = 13; h <= 15; h++) {
+        const endM = (h === 15) ? 0 : 59;
+        for (let m = 0; m <= endM; m++) {
+          times.push(`${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`);
+        }
+      }
+      return times;
+    })();
+
+    document.querySelectorAll("nav button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".page-section").forEach(sec => sec.style.display = "none");
+        document.getElementById("page-" + btn.dataset.page).style.display = "block";
+      });
+    });
+    document.getElementById("page-basis").style.display = "block";
+
+    const basisSymbols = ["IH", "IF", "IC", "IM"];
+    const contractMonths = ["00", "01", "02", "03"];
+    const basisCharts = {}, basisData = {};
+
+    const basisPage = document.getElementById("page-basis");
+
+    basisSymbols.forEach(symbol => {
+      const box = document.createElement("div");
+      box.className = "chart-box";
+      box.innerHTML = `<div class='chart-title'>${symbol} 基差</div><div class='chart-content'></div>`;
+      basisPage.appendChild(box);
+
+      const chartDiv = box.querySelector(".chart-content");
+      const chart = echarts.init(chartDiv);
+      // const box = document.createElement("div");
+      // box.className = "chart-box";
+      // box.innerHTML = `
+      //   <div class="chart-title">${symbol} 品种基差</div>
+      //   <div style="width:100%; height:300px;"></div>
+      // `;
+      // basisPage.appendChild(box);
+
+      // const chartDiv = box.querySelector("div:last-child");
+      // const chart = echarts.init(chartDiv);
+
+      basisCharts[symbol] = chart;
+      basisData[symbol] = {};
+      contractMonths.forEach(m => basisData[symbol][m] = new Array(timeAxis.length).fill(null));
+
+      chart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: contractMonths },
+        xAxis: { type: 'category', data: timeAxis, boundaryGap: false },
+        yAxis: { type: 'value', name: '基差', scale: true },
+        series: contractMonths.map(m => ({ name: m, type: 'line', data: basisData[symbol][m], showSymbol: false })),
+        graphic: []
+      });
+    });
+
+    function updateBasisCharts() {
+      basisSymbols.forEach(symbol => {
+        const graphics = contractMonths.map((month, idx) => {
+          const arr = basisData[symbol][month];
+          const val = [...arr].reverse().find(v => v != null);
+          return {
+            type: 'text',
+            left: '85%',
+            top: 50 + idx * 20,
+            style: {
+              text: `${month}: ${val != null ? val.toFixed(2) : '--'}`,
+              fill: '#333',
+              font: '14px Microsoft Yahei',
+            }
+          };
+        });
+        basisCharts[symbol].setOption({
+          series: contractMonths.map(m => ({ name: m, data: basisData[symbol][m] })),
+          graphic: graphics
+        });
+      });
+    }
+
+    const ivCodes = ["IO2508-C-4100.CFE", "IO2508-P-4100.CFE"];
+    const ivCharts = {}, ivData = {};
+    const ivPage = document.getElementById("page-option_iv");
+
+    ivCodes.forEach(code => {
+      const box = document.createElement("div");
+      box.className = "chart-box";
+      box.innerHTML = `<div class='chart-title'>${code} IV</div><div class='chart-content'></div>`;
+      ivPage.appendChild(box);
+
+      const chart = echarts.init(box.querySelector(".chart-content"));
+      ivCharts[code] = chart;
+      ivData[code] = new Array(timeAxis.length).fill(null);
+
+      chart.setOption({
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: timeAxis, boundaryGap: false },
+        yAxis: { type: 'value', name: 'IV', scale: true },
+        series: [{ name: code, type: 'line', data: ivData[code], showSymbol: false }]
+      });
+    });
+
+    const etfPage = document.getElementById("page-etf");
+    etfPage.innerHTML = `<div class="chart-box"><div class="chart-title">ETF 实时申赎功能待接入...</div></div>`;
+
+    const ws = new WebSocket("ws://localhost:8765/");
+    ws.onmessage = event => {
+      const allData = JSON.parse(event.data);
+
+      for (const [code, list] of Object.entries(allData)) {
+        const match = code.match(/^([A-Z]+)(\d{2})\.CFE$/);
+        if (match) {
+          const symbol = match[1], month = match[2];
+          if (basisData[symbol] && basisData[symbol][month]) {
+            list.forEach(item => {
+              const idx = timeAxis.indexOf(item.time.slice(0,5));
+              if (idx !== -1) basisData[symbol][month][idx] = item.basis;
+            });
+          }
+          updateBasisCharts();
+          continue;
+        }
+        if (ivData[code]) {
+          list.forEach(item => {
+            const idx = timeAxis.indexOf(item.time.slice(0,5));
+            if (idx !== -1) ivData[code][idx] = item.iv;
+          });
+          ivCharts[code].setOption({ series: [{ data: ivData[code] }] });
+        }
+      }
+    };
+  </script>
+</body>
+</html>
